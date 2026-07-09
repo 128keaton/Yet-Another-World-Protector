@@ -190,7 +190,8 @@ public class CommandInterceptor {
                 if (isCreateCmd) {
                     if (isParentArgProvided) {
                         ParsedArgument<CommandSourceStack, ?> commandSourceParsedArgument = cmdContext.getArguments().get(nodeNames.get(4));
-                        if (commandSourceParsedArgument.getResult() instanceof String parentName) {
+                        // Guard against null argument (defensive)
+                        if (commandSourceParsedArgument != null && commandSourceParsedArgument.getResult() instanceof String parentName) {
                             IMarkableRegion parent = levelRegionData.getLocal(parentName);
                             if (parent != null) {
                                 hasRegionPermission = Permissions.get().hasGroupPermission(parent, player, Permissions.OWNER);
@@ -268,6 +269,9 @@ public class CommandInterceptor {
                 }
                 case "global": {
                     GlobalRegion region = RegionManager.get().getGlobalRegion();
+                    if (region == null) {
+                        return CANCEL_CMD;
+                    }
                     Function<List<String>, Boolean> subCmdPermission = (nodes) -> {
                         //  0   1    2       3      4         5
                         // /wp flag global <flag> enable|msg ...
@@ -297,6 +301,9 @@ public class CommandInterceptor {
     private static int verifyGlobalCommandPermission(CommandContextBuilder<CommandSourceStack> cmdContext, CommandSourceType cmdSrcType) {
         CommandSourceStack src = cmdContext.getSource();
         GlobalRegion region = RegionManager.get().getGlobalRegion();
+        if (region == null) {
+            return CANCEL_CMD;
+        }
         try {
             Function<List<String>, Boolean> subCmdPermission = (nodes) -> {
                 //  0  1      2         3

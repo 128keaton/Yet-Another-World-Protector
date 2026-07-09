@@ -47,28 +47,54 @@ public final class RegionSpatialCache {
             return;
         }
         var levelRegionData = maybeLevelRegionData.get();
+        if (levelRegionData == null) {
+            return;
+        }
         RegionSpatialCache cache = RegionSpatialCache.get(levelRegionData.getDimKey());
+        if (cache == null) {
+            return;
+        }
         levelRegionData.getLocals().forEach((k, region) -> {
-            cache.addRegion(region);
+            if (region != null) {
+                cache.addRegion(region);
+            }
         });
     }
 
     public static boolean onCreateRegion(RegionEvent.Create create) {
+        if (create == null || create.getRegion() == null) {
+            return true;
+        }
         RegionSpatialCache cache = RegionSpatialCache.get(create.getRegion().getDim());
+        if (cache == null) {
+            return true;
+        }
         cache.addRegion(create.getRegion());
         LOGGER.info("Added region {} to PlayerPosTracker cache.", create.getRegion().getName());
         return true;
     }
 
     public static boolean onRemoveRegion(RegionEvent.Remove remove) {
+        if (remove == null || remove.getRegion() == null) {
+            return true;
+        }
         RegionSpatialCache cache = RegionSpatialCache.get(remove.getRegion().getDim());
+        if (cache == null) {
+            return true;
+        }
         cache.removeRegion(remove.getRegion());
         LOGGER.info("Removed region {} from PlayerPosTracker cache.", remove.getRegion().getName());
         return true;
     }
 
     public static boolean onUpdateRegion(RegionEvent.UpdateArea updateArea) {
+        if (updateArea == null || updateArea.getRegion() == null) {
+            return true;
+        }
         RegionSpatialCache cache = RegionSpatialCache.get(updateArea.getRegion().getDim());
+        if (cache == null) {
+            return true;
+        }
         cache.updateRegion(updateArea.getRegion());
         LOGGER.info("Updated region {} in PlayerPosTracker cache.", updateArea.getRegion().getName());
         return true;
