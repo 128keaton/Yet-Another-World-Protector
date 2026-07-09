@@ -92,6 +92,12 @@ public class YetAnotherWorldProtector implements YAWPModInitializer {
                         RegionDataManager.saveOnUnload(serverLevel);
                     }
                 });
+        MinecraftForge.EVENT_BUS.addListener(EventPriority.HIGHEST, true,
+                (LevelEvent.Save saveEvent) -> {
+                    if (saveEvent.getLevel() instanceof ServerLevel serverLevel) {
+                        RegionDataManager.processPendingSaves();
+                    }
+                });
     }
 
     @Override

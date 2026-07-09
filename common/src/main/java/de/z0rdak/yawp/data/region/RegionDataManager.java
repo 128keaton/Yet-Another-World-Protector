@@ -45,6 +45,12 @@ public class RegionDataManager {
     private static LevelListData trackedLevelData;
     private static GlobalRegionData globalRegionData = new GlobalRegionData();
     private static final Map<ResourceLocation, LevelRegionData> levelRegionData = new  HashMap<>();
+    
+    // Save batching system - prevents disk thrashing
+    private static long lastSaveTime = 0;
+    private static final long SAVE_BATCH_INTERVAL_MS = 5000; // 5 second minimum between full saves
+    private static boolean hasPendingSaves = false;
+    private static final Set<ResourceLocation> pendingLevelSaves = new HashSet<>();
 
     public static LevelListData getTrackedLevelData() {
         return trackedLevelData;
@@ -72,10 +78,59 @@ public class RegionDataManager {
     private RegionDataManager() {
     }
 
+    /**
+     * Schedules a batched save operation. Multiple calls within SAVE_BATCH_INTERVAL_MS
+     * will be coalesced into a single disk operation. This dramatically reduces I/O thrashing.
+     */
     public static void save() {
+        long currentTime = System.currentTimeMillis();
+        long timeSinceLastSave = currentTime - lastSaveTime;
+        
+        // If enough time has passed, save immediately
+        if (timeSinceLastSave >= SAVE_BATCH_INTERVAL_MS) {
+            performSave();
+            lastSaveTime = currentTime;
+            hasPendingSaves = false;
+            pendingLevelSaves.clear();
+        } else {
+            // Mark that we have pending saves to do later
+            hasPendingSaves = true;
+        }
+    }
+    
+    /**
+     * Force an immediate save. Only call for critical operations (shutdown, level unload).
+     */
+    public static void forceSave() {
+        performSave();
+        lastSaveTime = System.currentTimeMillis();
+        hasPendingSaves = false;
+        pendingLevelSaves.clear();
+    }
+    
+    /**
+     * Performs the actual save operation to disk.
+     */
+    private static void performSave() {
         saveTrackedLevelList();
         saveGlobalData();
-        saveTrackedLevels();
+        
+        // Only save the levels that have pending changes
+        if (pendingLevelSaves.isEmpty()) {
+            // Fall back to saving all tracked levels if no specific ones marked
+            saveTrackedLevels();
+        } else {
+            // Only save the dirty levels
+            pendingLevelSaves.forEach(RegionDataManager::saveLevelData);
+            pendingLevelSaves.clear();
+        }
+    }
+    
+    /**
+     * Mark a specific level as having pending saves
+     */
+    private static void markLevelDirty(ResourceLocation levelRl) {
+        pendingLevelSaves.add(levelRl);
     }
 
     public static LevelListData getSavedDims(@Nullable Supplier<LevelListData> defaultSupplier) {
@@ -108,7 +163,8 @@ public class RegionDataManager {
         if (!trackedLevelData.doesTrack(rl)) {
             return;
         }
-        saveLevelData(rl);
+        markLevelDirty(rl);
+        save();
     }
 
     public static void saveLevel(ServerLevel level) {
@@ -122,7 +178,9 @@ public class RegionDataManager {
             return;
         }
         LOGGER.info(Component.translatableWithFallback(  "data.region.levels.save.unload", "Unloading level '%s'. Saving region data", level.dimension().location().toString()).getString());
+        // Force immediate save on unload
         saveLevelData(level);
+        forceSave();
     }
 
     private static void saveTrackedLevelList() {
@@ -154,13 +212,14 @@ public class RegionDataManager {
     public static void saveOnStop(MinecraftServer server) {
         if (serverInstance == null) serverInstance = server;
         LOGGER.info(Component.translatableWithFallback("data.region.levels.save.stopped", "Stopping server. Saving region data for all levels").getString());
-        save();
+        forceSave();
     }
 
     public static void saveOnUnload(MinecraftServer server, ServerLevel level) {
         if (trackedLevelData.doesTrack(level.dimension().location())) {
             LOGGER.info(Component.translatableWithFallback("data.region.levels.save.unload", "Unloading level '%s'. Saving region data", level.dimension().location().toString()).getString());
             saveLevelData(level);
+            forceSave();
         }
     }
 
@@ -250,6 +309,25 @@ public class RegionDataManager {
     }
 
 
+    /**
+     * Called periodically to process any pending batched saves.
+     * Can be called from server tick or level save events.
+     */
+    public static void processPendingSaves() {
+        if (hasPendingSaves) {
+            long currentTime = System.currentTimeMillis();
+            long timeSinceLastSave = currentTime - lastSaveTime;
+            
+            // If batch interval has elapsed, perform the save
+            if (timeSinceLastSave >= SAVE_BATCH_INTERVAL_MS) {
+                performSave();
+                lastSaveTime = currentTime;
+                hasPendingSaves = false;
+                pendingLevelSaves.clear();
+            }
+        }
+    }
+
     public static void initLevelDataOnLogin(Entity entity, Level level) {
         if (isServerSide(level) && entity instanceof Player) {
             var shouldCreateNewLevelData = Services.FEATURE_MANAGER.shouldCreateNewLevelData();
@@ -272,8 +350,7 @@ public class RegionDataManager {
         saveLevel(rl);
         trackedLevelData.removeTrackingFor(rl);
         levelRegionData.remove(rl);
-        saveTrackedLevelList();
-
+        forceSave();
     }
 
     public static LevelRegionData addTrackingFor(ResourceLocation rl){
@@ -294,8 +371,9 @@ public class RegionDataManager {
         // add as child of global
         RegionManager.get().getGlobalRegion().addChild(dimensionalRegion);
         LOGGER.info(Component.translatableWithFallback("data.region.levels.init", "Initializing region data for level '%s'", rl.toString()).getString());
-        saveLevel(rl);
-        saveTrackedLevelList();
+        // Force immediate save on new tracking
+        markLevelDirty(rl);
+        forceSave();
         return newLevelRegion;
     }
 
