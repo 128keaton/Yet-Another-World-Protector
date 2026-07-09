@@ -83,6 +83,11 @@ public class RegionDataManager {
      * will be coalesced into a single disk operation. This dramatically reduces I/O thrashing.
      */
     public static void save() {
+        // Guard against save attempts before initialization
+        if (serverInstance == null || trackedLevelData == null) {
+            return;
+        }
+        
         long currentTime = System.currentTimeMillis();
         long timeSinceLastSave = currentTime - lastSaveTime;
         
@@ -102,6 +107,11 @@ public class RegionDataManager {
      * Force an immediate save. Only call for critical operations (shutdown, level unload).
      */
     public static void forceSave() {
+        // Guard against save attempts before initialization
+        if (serverInstance == null || trackedLevelData == null) {
+            return;
+        }
+        
         performSave();
         lastSaveTime = System.currentTimeMillis();
         hasPendingSaves = false;
@@ -112,6 +122,12 @@ public class RegionDataManager {
      * Performs the actual save operation to disk.
      */
     private static void performSave() {
+        // Guard against save attempts before initialization
+        if (serverInstance == null || trackedLevelData == null) {
+            LOGGER.debug("Cannot perform save: server or data not initialized yet");
+            return;
+        }
+        
         saveTrackedLevelList();
         saveGlobalData();
         
@@ -160,7 +176,7 @@ public class RegionDataManager {
     }
 
     public static void saveLevel(ResourceLocation rl) {
-        if (!trackedLevelData.doesTrack(rl)) {
+        if (trackedLevelData == null || !trackedLevelData.doesTrack(rl)) {
             return;
         }
         markLevelDirty(rl);
@@ -184,12 +200,20 @@ public class RegionDataManager {
     }
 
     private static void saveTrackedLevelList() {
+        if (trackedLevelData == null) {
+            LOGGER.warn("Attempted to save tracked level list before initialization");
+            return;
+        }
         DimensionDataStorage dataStorage = serverInstance.overworld().getDataStorage();
         dataStorage.set(LevelListData.TYPE, trackedLevelData);
         trackedLevelData.setDirty();
     }
 
     public static void saveGlobalData() {
+        if (globalRegionData == null) {
+            LOGGER.warn("Attempted to save global data before initialization");
+            return;
+        }
         DimensionDataStorage dataStorage = serverInstance.overworld().getDataStorage();
         dataStorage.set(Constants.MOD_ID + "/" + GLOBAL_REGION_FILE_NAME, globalRegionData);
         globalRegionData.setDirty();
@@ -201,8 +225,13 @@ public class RegionDataManager {
 
     private static void saveLevelData(ResourceLocation levelRl) {
         if (trackedLevelData.doesTrack(levelRl)) {
-            DimensionDataStorage storage = serverInstance.overworld().getDataStorage();
             LevelRegionData levelRegionData = RegionDataManager.levelRegionData.get(levelRl);
+            // Skip if level data not initialized yet (can happen during early saves)
+            if (levelRegionData == null) {
+                LOGGER.debug("Level data for '%s' not initialized yet, skipping save", levelRl.toString());
+                return;
+            }
+            DimensionDataStorage storage = serverInstance.overworld().getDataStorage();
             LOGGER.debug(Component.translatableWithFallback("data.region.levels.save", "Saving region data for level '%s' (%s local region(s))", levelRl.toString(), levelRegionData.regionCount()).getString());
             storage.set(LevelRegionData.buildSavedDataType(levelRl), levelRegionData);
             levelRegionData.setDirty();
@@ -314,6 +343,11 @@ public class RegionDataManager {
      * Can be called from server tick or level save events.
      */
     public static void processPendingSaves() {
+        // Guard against processing before initialization
+        if (serverInstance == null || trackedLevelData == null) {
+            return;
+        }
+        
         if (hasPendingSaves) {
             long currentTime = System.currentTimeMillis();
             long timeSinceLastSave = currentTime - lastSaveTime;
